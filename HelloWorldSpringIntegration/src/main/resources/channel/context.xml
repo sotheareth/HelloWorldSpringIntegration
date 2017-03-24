@@ -1,0 +1,108 @@
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:int="http://www.springframework.org/schema/integration"
+	xmlns:int-xml="http://www.springframework.org/schema/integration/xml"
+	xmlns:int-jdbc="http://www.springframework.org/schema/integration/jdbc"
+	xmlns:jdbc="http://www.springframework.org/schema/jdbc"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans
+    http://www.springframework.org/schema/beans/spring-beans.xsd
+    http://www.springframework.org/schema/integration/jdbc 
+    http://www.springframework.org/schema/integration/jdbc/spring-integration-jdbc.xsd    
+    http://www.springframework.org/schema/integration
+    http://www.springframework.org/schema/integration/spring-integration.xsd
+    http://www.springframework.org/schema/jdbc
+   	http://www.springframework.org/schema/jdbc/spring-jdbc.xsd
+    http://www.springframework.org/schema/integration/xml
+    http://www.springframework.org/schema/integration/xml/spring-integration-xml.xsd">
+
+	<int:poller default="true" fixed-delay="50"/>
+
+	<int:channel id="names" >
+		<int:queue message-store="store" />
+		<int:interceptors>
+			<bean id="globalLogger" class="com.spring.integration.interceptor.GlobalLoggerInterceptor" />
+		</int:interceptors>
+	</int:channel>
+
+	<!-- <int:logging-channel-adapter log-full-message="true" id="logger" level="DEBUG"/> -->
+
+	<int:message-history />
+
+	<int:service-activator input-channel="names" ref="helloService" method="sayHello" />
+
+	<bean id="helloService" class="com.spring.integration.service.MyHelloService" />
+
+
+	<int:channel-interceptor ref="globalLogger2" pattern="*" order="2" />
+
+	<bean id="globalLogger2" class="com.spring.integration.interceptor.GlobalLoggerInterceptor2" />
+
+
+	<!-- <int:channel id="payments" /> -->
+
+	<!-- <int:channel id="invoices" /> -->
+	<!-- <int:channel id="credit-card-payments" /> -->
+	<!-- <int:channel id="paypal-payments" /> -->
+
+	<!-- <int:router method="routePaymentSettlement" input-channel="payments"> -->
+	<!-- <bean class="com.spring.integration.router.PaymentSettlementRouter" 
+		/> -->
+	<!-- </int:router> -->
+
+	<bean id="serverDataSource" class="org.apache.commons.dbcp.BasicDataSource" destroy-method="close"> <!-- 2 -->
+		<property name="driverClassName" value="com.mysql.jdbc.Driver" />
+		<property name="url" value="jdbc:mysql://localhost:3306/test3" />
+		<property name="username" value="root" />
+		<property name="password" value="123456" />
+	</bean>
+
+	<!-- create table schema in your database -->
+	<!-- <jdbc:initialize-database data-source="serverDataSource"> 3 -->
+	<!-- <jdbc:script location="classpath:org/springframework/integration/jdbc/schema-mysql.sql"/> -->
+	<!-- </jdbc:initialize-database> -->
+
+	<!-- <bean id="store" class="org.springframework.integration.jdbc.store.JdbcChannelMessageStore"> -->
+	<!-- <property name="dataSource" ref="serverDataSource"/> -->
+	<!-- <property name="channelMessageStoreQueryProvider" ref="queryProvider"/> -->
+	<!-- <property name="region" value="${user.name}_${channel.queue.region:default}"/> -->
+	<!-- <property name="usingIdCache" value="true"/> -->
+	<!-- </bean> -->
+
+	<bean id="sessionQueuePersistance" class="com.spring.integration.session.SessionQueuePersistance">
+		<constructor-arg name="sessionInboundChannel" ref="names" />
+		<constructor-arg name="executorChannel" ref="sessionOutboundChannel" />
+	</bean>
+
+	<int-jdbc:message-store id="store" data-source="serverDataSource" />
+
+	<bean id="queryProvider"
+		class="org.springframework.integration.jdbc.store.channel.MySqlChannelMessageStoreQueryProvider" />
+
+	<!-- the bridge polls the persisted messages and forwards them to the output 
+		channel -->
+	<int:bridge input-channel="names" output-channel="sessionOutboundChannel">
+		<int:poller fixed-rate="1000" max-messages-per-poll="-1">
+			<int:transactional transaction-manager="txManager" />
+		</int:poller>
+	</int:bridge>
+
+	<bean id="txManager"
+		class="org.springframework.jdbc.datasource.DataSourceTransactionManager">
+		<property name="dataSource" ref="serverDataSource" />
+	</bean>
+
+	<int:channel id="sessionOutboundChannel">
+		<int:dispatcher task-executor="taskExecutor" />
+	</int:channel>
+
+	<bean id="sessionQueueReader" class="com.spring.integration.session.SessionReader" />
+
+	<int:service-activator input-channel="sessionOutboundChannel"
+		ref="sessionQueueReader" method="handleMessage" />
+
+	<bean id="taskExecutor"
+		class="org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor">
+		<property name="corePoolSize" value="4" />
+		<property name="maxPoolSize" value="4" />
+	</bean>
+
+</beans>
